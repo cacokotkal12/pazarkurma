@@ -21,6 +21,7 @@ KEY_DELAY = 0.20                      # Klavye bekleme (sn)
 MOUSE_DELAY = 0.10                    # Mouse bekleme (sn)
 TEMPLATE_PATH = "bos_slot.png"        # Boş slot şablon dosyası
 TEMPLATE_THRESH = 0.97                # Şablon benzerlik eşiği
+SETTINGS_PATH = "ayarlar.json"        # Kalıcı ayar dosyası
 
 # --- Pano / Yapıştırıcı ---
 TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # Tesseract yolu
@@ -34,7 +35,7 @@ POSSIBLE_KO_TITLES = [          # KO pencere başlıkları
 ]
 # =================================================================
 
-import time, threading, traceback, requests
+import time, threading, traceback, requests, json, os
 import pyautogui, cv2, numpy as np
 from pynput.mouse import Controller as MouseController
 from pynput.keyboard import Controller as KeyboardController, Key
@@ -252,34 +253,129 @@ class SlotCheckerGUI(tk.Tk):
     def update_timer(self, t: int):
         self.timer_label.config(text=f"Sonraki taramaya kalan süre: {t} saniye")
 
+    def _set_thresholds_from_values(self, t1: int, t2: int, t3: int, tel: int, show_message: bool = True):
+        if min(t1, t2, t3, tel) < 1:
+            raise ValueError("Eşikler 1'den küçük olamaz.")
+        if not (t1 < t2 < t3):
+            raise ValueError("Sıra şartı: T1 < T2 < T3 olmalı.")
+        self.threshold_1 = t1
+        self.threshold_2 = t2
+        self.threshold_3 = t3
+        self.telegram_threshold = tel
+        self.stage2_done = False if self.stage1_done else self.stage2_done
+        self.stage3_done = False
+        if show_message:
+            messagebox.showinfo("OK", f"Eşikler kaydedildi: {t1} / {t2} / {t3}, TEL={tel}")
+
+    def _set_check_interval(self, value: int, show_message: bool = True):
+        if value < 1:
+            raise ValueError("Süre 1'den küçük olamaz.")
+        self.check_interval = value
+        if show_message:
+            messagebox.showinfo("OK", f"Süre {value} sn")
+
+    def persist_settings(self):
+        try:
+            data = {
+                "name": self.name_entry.get().strip(),
+                "threshold_1": self.threshold_1,
+                "threshold_2": self.threshold_2,
+                "threshold_3": self.threshold_3,
+                "telegram_threshold": self.telegram_threshold,
+                "check_interval": self.check_interval,
+            }
+            if hasattr(self, "telegram_entry"):
+                data["telegram_id"] = self.telegram_entry.get().strip()
+            if hasattr(self, "saved_text"):
+                data["saved_text"] = self.saved_text
+            if hasattr(self, "lock_var"):
+                data["clipboard_lock"] = bool(self.lock_var.get())
+            with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[WARN] Ayarlar kaydedilemedi: {e}")
+
+    def load_settings(self):
+        if not os.path.exists(SETTINGS_PATH):
+            return
+        try:
+            with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"[WARN] Ayarlar okunamadı: {e}")
+            return
+
+        # Kimlik
+        name_val = data.get("name")
+        if name_val is not None:
+            self.name_entry.delete(0, tk.END)
+            self.name_entry.insert(0, str(name_val))
+
+        # Eşikler
+        try:
+            t1 = int(data.get("threshold_1", self.threshold_1))
+            t2 = int(data.get("threshold_2", self.threshold_2))
+            t3 = int(data.get("threshold_3", self.threshold_3))
+            tel = int(data.get("telegram_threshold", self.telegram_threshold))
+            self._set_thresholds_from_values(t1, t2, t3, tel, show_message=False)
+            self.entry_t1.delete(0, tk.END); self.entry_t1.insert(0, str(t1))
+            self.entry_t2.delete(0, tk.END); self.entry_t2.insert(0, str(t2))
+            self.entry_t3.delete(0, tk.END); self.entry_t3.insert(0, str(t3))
+            self.entry_tel.delete(0, tk.END); self.entry_tel.insert(0, str(tel))
+        except Exception as e:
+            print(f"[WARN] Eşikler yüklenemedi: {e}")
+
+        # Süre
+        try:
+            interval_val = int(data.get("check_interval", self.check_interval))
+            self._set_check_interval(interval_val, show_message=False)
+            self.entry_interval.delete(0, tk.END)
+            self.entry_interval.insert(0, str(interval_val))
+        except Exception as e:
+            print(f"[WARN] Süre yüklenemedi: {e}")
+
+        # Ek alanlar (varsa)
+        if hasattr(self, "telegram_entry"):
+            tid = data.get("telegram_id")
+            if tid is not None:
+                self.telegram_entry.delete(0, tk.END)
+                self.telegram_entry.insert(0, str(tid))
+                self.telegram_id = tid
+        if hasattr(self, "text_entry"):
+            saved_text_val = data.get("saved_text", "")
+            if saved_text_val:
+                self.text_entry.delete(0, tk.END)
+                self.text_entry.insert(0, saved_text_val)
+                self.saved_text = saved_text_val
+                if hasattr(self, "_reassert_clipboard"):
+                    try:
+                        self._reassert_clipboard()
+                    except Exception:
+                        pass
+        if hasattr(self, "lock_var"):
+            lock_state = data.get("clipboard_lock")
+            if lock_state is not None:
+                try:
+                    self.lock_var.set(bool(lock_state))
+                except Exception:
+                    pass
+
     def save_thresholds(self):
         try:
             t1 = int(self.entry_t1.get())
             t2 = int(self.entry_t2.get())
             t3 = int(self.entry_t3.get())
             tel = int(self.entry_tel.get())
-            if min(t1, t2, t3, tel) < 1:
-                raise ValueError("Eşikler 1'den küçük olamaz.")
-            if not (t1 < t2 < t3):
-                raise ValueError("Sıra şartı: T1 < T2 < T3 olmalı.")
-            self.threshold_1 = t1
-            self.threshold_2 = t2
-            self.threshold_3 = t3
-            self.telegram_threshold = tel
-            # Üst seviyeleri güvenli sıfırla
-            self.stage2_done = False if self.stage1_done else self.stage2_done
-            self.stage3_done = False
-            messagebox.showinfo("OK", f"Eşikler kaydedildi: {t1} / {t2} / {t3}, TEL={tel}")
+            self._set_thresholds_from_values(t1, t2, t3, tel, show_message=True)
+            self.persist_settings()
         except Exception as e:
             messagebox.showerror("Hata", str(e))
 
     def save_check_interval(self):
         try:
             v = int(self.entry_interval.get())
-            if v < 1:
-                raise ValueError("Süre 1'den küçük olamaz.")
-            self.check_interval = v
-            messagebox.showinfo("OK", f"Süre {v} sn")
+            self._set_check_interval(v, show_message=True)
+            self.persist_settings()
         except Exception as e:
             messagebox.showerror("Hata", f"Geçerli sayı girin. {e}")
 
@@ -360,12 +456,16 @@ class SlotCheckerApp(SlotCheckerGUI):
         # Pano bekçisi başlat
         self.after(CLIPBOARD_POLL_MS, self._clipboard_guard_loop)
 
+        # Kayıtlı ayarları (varsa) yükle
+        self.load_settings()
+
     # ----- Telegram -----
     def save_telegram_id(self):
         tid = self.telegram_entry.get().strip()
         if tid:
             self.telegram_id = tid           # şimdilik sadece hafızada tutuyor
             print(f"Telegram ID kaydedildi: {tid}")
+            self.persist_settings()
         else:
             print("Lütfen bir Telegram ID girin!")
 
@@ -383,6 +483,7 @@ class SlotCheckerApp(SlotCheckerGUI):
         self.saved_text = val            # 1) metni hafızada tut
         self._reassert_clipboard()       # 2) panoya yaz
         self._reassert_clipboard()       # 3) hemen tekrar yaz (ikileme)
+        self.persist_settings()
         print("Metin kaydedildi ve panoya kopyalandı (yeniden teyit edildi).")
 
     # ----- Güvenli Yapıştır -----
@@ -440,6 +541,7 @@ class SlotCheckerApp(SlotCheckerGUI):
 
     def _on_lock_toggle(self):
         print("Pano kilidi:", "Açık" if self.lock_var.get() else "Kapalı")
+        self.persist_settings()
 
     # ----- Yardımcı: panoyu saved_text ile doldur -----
     def _reassert_clipboard(self):
