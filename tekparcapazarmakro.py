@@ -23,17 +23,6 @@ TEMPLATE_PATH = "bos_slot.png"        # Boş slot şablon dosyası
 TEMPLATE_THRESH = 0.97                # Şablon benzerlik eşiği
 SETTINGS_PATH = "ayarlar.json"        # Kalıcı ayar dosyası
 
-# --- Launcher / Oyun Giriş ---
-LAUNCHER_EXE = r"C:\\NTTGame\\KnightOnlineEn\\Launcher.exe"
-FALLBACK_LAUNCHERS = [r"C:\\NTTGame\\KnightOnLineEn\\Launcher.exe"]
-LAUNCHER_START_CLICK_POS = (974, 726)
-WINDOW_TITLE_KEYWORD = "Knight Online"
-WINDOW_APPEAR_TIMEOUT = 120.0
-LOGIN_USERNAME_CLICK_POS = (579, 326)
-LOGIN_PASSWORD_CLICK_POS = (579, 378)
-SERVER_OPEN_POS = (455, 231)
-SPLASH_CLICK_POS = (700, 550)
-
 # --- Pano / Yapıştırıcı ---
 TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # Tesseract yolu
 BRING_KO_BEFORE_PASTE = True    # Yapıştırma öncesi KO penceresini öne al
@@ -46,8 +35,8 @@ POSSIBLE_KO_TITLES = [          # KO pencere başlıkları
 ]
 # =================================================================
 
-import time, threading, traceback, requests, json, os, subprocess, ctypes, sys
-import pyautogui, cv2, numpy as np, keyboard
+import time, threading, traceback, requests, json, os
+import pyautogui, cv2, numpy as np
 from pynput.mouse import Controller as MouseController
 from pynput.keyboard import Controller as KeyboardController, Key
 import win32api, win32con
@@ -62,24 +51,6 @@ from tkinter import ttk
 
 # Tesseract yolunu ata
 pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
-
-
-def _read_settings_store():
-    if not os.path.exists(SETTINGS_PATH):
-        return {}
-    try:
-        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _write_settings_store(data: dict):
-    try:
-        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"[WARN] Ayarlar kaydedilemedi: {e}")
 
 # pyautogui ayarları
 pyautogui.FAILSAFE = False
@@ -216,23 +187,16 @@ def bot_loop(gui):
             gui.update_timer(t); time.sleep(1)
 
 # ========================= SLOT CHECKER TKINTER GUI =========================
-class SlotCheckerGUI(tk.Frame):
-    def __init__(self, master=None):
-        super().__init__(master)
+class SlotCheckerGUI(tk.Tk):
+    def __init__(self):
+        super().__init__()
         try:
             self.tk.call('tk', 'scaling', 1.0)   # DPI düzeltme
         except Exception:
             pass
-
-        toplevel = self.winfo_toplevel()
-        if isinstance(toplevel, tk.Tk):
-            try:
-                toplevel.title("Slot Checker - Ahmet2 (Sıralı 3 Eşik: 1->2->3)")
-                toplevel.geometry("480x920")
-                toplevel.resizable(False, False)
-            except Exception:
-                pass
-        self.pack(fill="both", expand=True)
+        self.title("Slot Checker - Ahmet2 (Sıralı 3 Eşik: 1->2->3)")
+        self.geometry("480x920")
+        self.resizable(False, False)
 
         # Durum değişkenleri
         self.running = False
@@ -386,28 +350,37 @@ class SlotCheckerGUI(tk.Frame):
             messagebox.showinfo("OK", f"Süre {value} sn")
 
     def persist_settings(self):
-        data = _read_settings_store()
-        data["slot_checker"] = {
-            "name": self.name_entry.get().strip(),
-            "threshold_1": self.threshold_1,
-            "threshold_2": self.threshold_2,
-            "threshold_3": self.threshold_3,
-            "telegram_threshold": self.telegram_threshold,
-            "check_interval": self.check_interval,
-            "key_delay": self.key_delay,
-            "mouse_delay": self.mouse_delay,
-        }
-        if hasattr(self, "telegram_entry"):
-            data["slot_checker"]["telegram_id"] = self.telegram_entry.get().strip()
-        if hasattr(self, "saved_text"):
-            data["slot_checker"]["saved_text"] = self.saved_text
-        if hasattr(self, "lock_var"):
-            data["slot_checker"]["clipboard_lock"] = bool(self.lock_var.get())
-        _write_settings_store(data)
+        try:
+            data = {
+                "name": self.name_entry.get().strip(),
+                "threshold_1": self.threshold_1,
+                "threshold_2": self.threshold_2,
+                "threshold_3": self.threshold_3,
+                "telegram_threshold": self.telegram_threshold,
+                "check_interval": self.check_interval,
+                "key_delay": self.key_delay,
+                "mouse_delay": self.mouse_delay,
+            }
+            if hasattr(self, "telegram_entry"):
+                data["telegram_id"] = self.telegram_entry.get().strip()
+            if hasattr(self, "saved_text"):
+                data["saved_text"] = self.saved_text
+            if hasattr(self, "lock_var"):
+                data["clipboard_lock"] = bool(self.lock_var.get())
+            with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[WARN] Ayarlar kaydedilemedi: {e}")
 
     def load_settings(self):
-        store = _read_settings_store()
-        data = store.get("slot_checker", store)
+        if not os.path.exists(SETTINGS_PATH):
+            return
+        try:
+            with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"[WARN] Ayarlar okunamadı: {e}")
+            return
 
         # Kimlik
         name_val = data.get("name")
@@ -615,8 +588,8 @@ def get_coordinates_from_screen():
 # =================== GELİŞMİŞ APP (PANO + SLOT CHECKER) ===================
 class SlotCheckerApp(SlotCheckerGUI):
     """Kaydedilen metni her zaman panoda tutar ve güvenli yapıştır yapar."""
-    def __init__(self, master=None, *args, **kwargs):
-        super().__init__(master, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
         # Durum
         self.saved_text = ""                 # Sürekli korunacak metin
@@ -750,294 +723,8 @@ class SlotCheckerApp(SlotCheckerGUI):
         except Exception as e:
             print(f"Pano yazma hatası: {e}")
 
-# =================== OYUN GİRİŞ MAKROSU (TAB) ===================
-APP_NAME = "KOLogin"
-VK_CAPITAL = 0x14
-
-
-def _kb_pressed(name: str) -> bool:
-    try:
-        return keyboard.is_pressed(name)
-    except Exception:
-        return False
-
-
-def is_capslock_on():
-    return bool(ctypes.windll.user32.GetKeyState(VK_CAPITAL) & 1)
-
-
-def wait_if_paused():
-    while is_capslock_on():
-        time.sleep(0.1)
-
-
-def pause_point(ui_abort: threading.Event):
-    if ui_abort.is_set():
-        raise KeyboardInterrupt("UI abort")
-    wait_if_paused()
-    if _kb_pressed("f12"):
-        raise KeyboardInterrupt("F12 abort")
-    return True
-
-
-def sleep_respect_pause(ui_abort: threading.Event, seconds: float):
-    end = time.time() + float(seconds)
-    while time.time() < end:
-        pause_point(ui_abort)
-        time.sleep(0.05)
-
-
-def mouse_move(x: int, y: int, delay: float):
-    pause_point(LoginMacroTab.UI_ABORT)
-    ctypes.windll.user32.SetCursorPos(int(x), int(y))
-    time.sleep(delay)
-
-
-def mouse_click(delay: float, button: str = "left"):
-    pause_point(LoginMacroTab.UI_ABORT)
-    flags_down, flags_up = (win32con.MOUSEEVENTF_LEFTDOWN, win32con.MOUSEEVENTF_LEFTUP) if button == "left" else (
-        win32con.MOUSEEVENTF_RIGHTDOWN, win32con.MOUSEEVENTF_RIGHTUP)
-    win32api.mouse_event(flags_down, 0, 0)
-    time.sleep(delay / 2)
-    win32api.mouse_event(flags_up, 0, 0)
-    time.sleep(delay / 2)
-
-
-def press_vk(vk: int, delay: float):
-    pause_point(LoginMacroTab.UI_ABORT)
-    ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
-    time.sleep(delay)
-    ctypes.windll.user32.keybd_event(vk, 0, 2, 0)
-    time.sleep(delay)
-
-
-class LoginMacroTab(tk.Frame):
-    UI_ABORT = threading.Event()
-
-    def __init__(self, master=None):
-        super().__init__(master)
-        self.pack(fill="both", expand=True)
-        ttk.Label(self, text="Knight Online - Oyuna Giriş (StartPNG)", font=("Segoe UI", 13, "bold")).grid(
-            row=0, column=0, columnspan=6, pady=(8, 12))
-
-        self.username = ttk.Entry(self, width=32)
-        self.password = ttk.Entry(self, width=32, show="*")
-        ttk.Label(self, text="Kullanıcı Adı:").grid(row=1, column=0, sticky="w", pady=4)
-        self.username.grid(row=1, column=1, columnspan=2, sticky="w")
-        ttk.Label(self, text="Şifre:").grid(row=2, column=0, sticky="w", pady=4)
-        self.password.grid(row=2, column=1, columnspan=2, sticky="w")
-
-        ttk.Label(self, text="Hedef Server:").grid(row=1, column=3, sticky="e")
-        self.server_target = tk.StringVar(value="1")
-        ttk.Radiobutton(self, text="1", variable=self.server_target, value="1").grid(row=1, column=4, sticky="w")
-        ttk.Radiobutton(self, text="2", variable=self.server_target, value="2").grid(row=1, column=5, sticky="w")
-
-        self.s1x = ttk.Entry(self, width=8); self.s1y = ttk.Entry(self, width=8)
-        self.s2x = ttk.Entry(self, width=8); self.s2y = ttk.Entry(self, width=8)
-        ttk.Label(self, text="Server 1 X:").grid(row=3, column=0, sticky="e"); self.s1x.grid(row=3, column=1, sticky="w")
-        ttk.Label(self, text="Server 1 Y:").grid(row=3, column=2, sticky="e"); self.s1y.grid(row=3, column=3, sticky="w")
-        ttk.Label(self, text="Server 2 X:").grid(row=4, column=0, sticky="e"); self.s2x.grid(row=4, column=1, sticky="w")
-        ttk.Label(self, text="Server 2 Y:").grid(row=4, column=2, sticky="e"); self.s2y.grid(row=4, column=3, sticky="w")
-
-        self.s1x.insert(0, "671"); self.s1y.insert(0, "254")
-        self.s2x.insert(0, "676"); self.s2y.insert(0, "281")
-
-        self.tus_hizi = tk.DoubleVar(value=0.05)
-        self.mouse_hizi = tk.DoubleVar(value=0.1)
-        ttk.Label(self, text="Klavye Gecikme (sn):").grid(row=5, column=0, sticky="e", pady=4)
-        ttk.Entry(self, textvariable=self.tus_hizi, width=8).grid(row=5, column=1, sticky="w")
-        ttk.Label(self, text="Mouse Gecikme (sn):").grid(row=5, column=2, sticky="e", pady=4)
-        ttk.Entry(self, textvariable=self.mouse_hizi, width=8).grid(row=5, column=3, sticky="w")
-
-        self.btn_start = ttk.Button(self, text="Başlat", command=self.start_flow, width=18)
-        self.btn_stop = ttk.Button(self, text="Durdur", command=self.stop_flow, width=18, state="disabled")
-        self.btn_save = ttk.Button(self, text="Ayarları Kaydet", command=self.save_settings, width=18)
-        self.btn_start.grid(row=6, column=0, pady=10, sticky="w")
-        self.btn_stop.grid(row=6, column=1, pady=10, sticky="w")
-        self.btn_save.grid(row=6, column=2, pady=10, sticky="w")
-
-        ttk.Label(self, text="Log:").grid(row=7, column=0, sticky="w")
-        lf = ttk.Frame(self); lf.grid(row=8, column=0, columnspan=6, sticky="nsew")
-        self.txt = tk.Text(lf, width=86, height=14, font=("Consolas", 9))
-        self.txt.pack(side="left", fill="both", expand=True)
-        sb = ttk.Scrollbar(lf, orient="vertical", command=self.txt.yview); sb.pack(side="right", fill="y")
-        self.txt.configure(yscrollcommand=sb.set)
-        hook_ui_logger(self.add_log)
-        ttk.Label(self, text="CapsLock: Dur/Devam  |  F12: İptal", foreground="#777").grid(row=9, column=0, columnspan=6, pady=(6, 0))
-
-        self.load_settings()
-
-    def add_log(self, msg: str):
-        self.txt.insert("end", f"{msg}\n"); self.txt.see("end"); self.update_idletasks()
-
-    def load_settings(self):
-        data = _read_settings_store().get("ko_login", {})
-        self.username.delete(0, "end"); self.username.insert(0, data.get("username", ""))
-        self.password.delete(0, "end"); self.password.insert(0, data.get("password", ""))
-        self.server_target.set(str(data.get("target_server", "1")))
-        s1 = data.get("server1_xy", [671, 254]); s2 = data.get("server2_xy", [676, 281])
-        self.s1x.delete(0, "end"); self.s1x.insert(0, str(s1[0] if len(s1) >= 2 else 671))
-        self.s1y.delete(0, "end"); self.s1y.insert(0, str(s1[1] if len(s1) >= 2 else 254))
-        self.s2x.delete(0, "end"); self.s2x.insert(0, str(s2[0] if len(s2) >= 2 else 676))
-        self.s2y.delete(0, "end"); self.s2y.insert(0, str(s2[1] if len(s2) >= 2 else 281))
-        self.tus_hizi.set(float(data.get("key_delay", self.tus_hizi.get())))
-        self.mouse_hizi.set(float(data.get("mouse_delay", self.mouse_hizi.get())))
-        self.add_log("[Ayar] Giriş makro ayarları yüklendi.")
-
-    def save_settings(self):
-        def _to_int(v, d):
-            try:
-                return int(str(v).strip())
-            except Exception:
-                return d
-
-        store = _read_settings_store()
-        store["ko_login"] = {
-            "username": self.username.get().strip(),
-            "password": self.password.get().strip(),
-            "target_server": self.server_target.get(),
-            "server1_xy": [_to_int(self.s1x.get(), 671), _to_int(self.s1y.get(), 254)],
-            "server2_xy": [_to_int(self.s2x.get(), 676), _to_int(self.s2y.get(), 281)],
-            "key_delay": float(self.tus_hizi.get()),
-            "mouse_delay": float(self.mouse_hizi.get()),
-        }
-        _write_settings_store(store)
-        self.add_log("[Ayar] Ayarlar kaydedildi.")
-        messagebox.showinfo("Bilgi", "Ayarlar kaydedildi.")
-
-    def start_flow(self):
-        u = self.username.get().strip(); p = self.password.get().strip()
-        if not u or not p:
-            messagebox.showwarning("Uyarı", "Kullanıcı adı ve şifre boş olamaz!"); return
-        LoginMacroTab.UI_ABORT.clear()
-        self.btn_start.config(state="disabled"); self.btn_stop.config(state="normal"); self.btn_save.config(state="disabled")
-        s1 = (int(self.s1x.get()), int(self.s1y.get())); s2 = (int(self.s2x.get()), int(self.s2y.get()))
-        threading.Thread(target=self._run_flow, args=(u, p, self.server_target.get(), s1, s2), daemon=True).start()
-
-    def stop_flow(self):
-        LoginMacroTab.UI_ABORT.set()
-        self.add_log("[UI] Durdur istendi.")
-
-    def _run_flow(self, u, p, t, s1_xy, s2_xy):
-        ok = self.run_to_character(u, p, t, s1_xy, s2_xy)
-        if ok:
-            self.add_log("✓ Tamamlandı (StartPNG'ye kadar).")
-            messagebox.showinfo("Tamam", "Karakter ekranına kadar giriş tamamlandı.")
-        else:
-            self.add_log("✗ Başarısız. Koordinat/şablon/yolları kontrol edin.")
-        self.btn_start.config(state="normal"); self.btn_stop.config(state="disabled"); self.btn_save.config(state="normal")
-
-    # ---- Akış ----
-    def close_all_game_instances(self, max_wait: float = 8.0):
-        self.add_log("Mevcut KO/Launcher süreçleri kapatılıyor...")
-        os.system('taskkill /F /T /IM "KnightOnline.exe"')
-        os.system('taskkill /F /T /IM "Launcher.exe"')
-        end = time.time() + max_wait
-        while time.time() < end:
-            pause_point(LoginMacroTab.UI_ABORT)
-            time.sleep(0.2)
-
-    def start_launcher(self):
-        path = LAUNCHER_EXE if os.path.exists(LAUNCHER_EXE) else next((p for p in FALLBACK_LAUNCHERS if os.path.exists(p)), None)
-        if not path:
-            self.add_log("HATA: Launcher bulunamadı.")
-            return False
-        try:
-            os.startfile(path)
-        except Exception:
-            subprocess.Popen([path], shell=False)
-        self.add_log("Launcher başlatıldı")
-        return True
-
-    def bring_launcher_window_to_front(self):
-        wins = gw.getWindowsWithTitle("Launcher") or gw.getWindowsWithTitle("Knight Online Launcher")
-        if not wins:
-            return None
-        w = wins[0]
-        try:
-            if w.isMinimized:
-                w.restore()
-            w.activate(); time.sleep(0.3)
-            ctypes.windll.user32.SetForegroundWindow(int(w._hWnd))
-        except Exception:
-            pass
-        return w
-
-    def find_game_window(self, timeout=WINDOW_APPEAR_TIMEOUT):
-        self.add_log("Oyun penceresi bekleniyor...")
-        t0 = time.time()
-        while time.time() - t0 < timeout:
-            pause_point(LoginMacroTab.UI_ABORT)
-            wins = gw.getWindowsWithTitle(WINDOW_TITLE_KEYWORD)
-            cand = [w for w in wins if "launcher" not in w.title.lower() and "patch" not in w.title.lower()]
-            if cand:
-                cand.sort(key=lambda w: (w.width * w.height), reverse=True)
-                return cand[0]
-            time.sleep(0.3)
-        return None
-
-    def perform_login_inputs(self, username: str, password: str):
-        self.add_log("Kullanıcı adı yazılıyor...")
-        mouse_move(*LOGIN_USERNAME_CLICK_POS, delay=self.mouse_hizi.get()); mouse_click(self.mouse_hizi.get())
-        keyboard.write(username)
-        self.add_log("Şifre yazılıyor...")
-        mouse_move(*LOGIN_PASSWORD_CLICK_POS, delay=self.mouse_hizi.get()); mouse_click(self.mouse_hizi.get())
-        keyboard.write(password)
-        press_vk(win32con.VK_RETURN, self.tus_hizi.get())
-        press_vk(win32con.VK_RETURN, self.tus_hizi.get())
-        self.add_log("[LOGIN] Kimlik bilgileri girildi ve Enter basıldı.")
-
-    def select_server_by_coords(self, target: str, xy1: tuple[int, int], xy2: tuple[int, int]):
-        sel_xy = xy1 if str(target) == "1" else xy2
-        self.add_log(f"Server seçimi (hedef={target}) → {sel_xy}")
-        mouse_move(*SERVER_OPEN_POS, delay=self.mouse_hizi.get()); mouse_click(self.mouse_hizi.get())
-        if sel_xy and isinstance(sel_xy, tuple) and len(sel_xy) == 2:
-            mouse_move(*sel_xy, delay=self.mouse_hizi.get()); mouse_click(self.mouse_hizi.get())
-
-    def run_to_character(self, username: str, password: str, target_server: str, s1_xy: tuple[int, int], s2_xy: tuple[int, int]):
-        try:
-            self.close_all_game_instances()
-            self.add_log("Launcher açılıyor...")
-            if not self.start_launcher():
-                return False
-            time.sleep(2.0)
-            self.bring_launcher_window_to_front()
-            mouse_move(*LAUNCHER_START_CLICK_POS, delay=self.mouse_hizi.get()); mouse_click(self.mouse_hizi.get())
-            w = self.find_game_window(timeout=WINDOW_APPEAR_TIMEOUT)
-            if not w:
-                self.add_log("HATA: Oyun penceresi gelmedi.")
-                return False
-            mouse_move(*SPLASH_CLICK_POS, delay=self.mouse_hizi.get()); mouse_click(self.mouse_hizi.get())
-            mouse_click(self.mouse_hizi.get())
-            press_vk(win32con.VK_RETURN, self.tus_hizi.get())
-            press_vk(win32con.VK_RETURN, self.tus_hizi.get())
-            sleep_respect_pause(LoginMacroTab.UI_ABORT, 5.0)
-            self.perform_login_inputs(username, password)
-            self.select_server_by_coords(target_server, s1_xy, s2_xy)
-            press_vk(win32con.VK_RETURN, self.tus_hizi.get())
-            self.add_log("Karakter ekranı (StartPNG) bekleniyor...")
-            press_vk(win32con.VK_RETURN, self.tus_hizi.get())
-            return True
-        except KeyboardInterrupt:
-            return False
-        except Exception as e:
-            self.add_log(f"HATA: {e}")
-            return False
-
-
-# =================== ANA UYGULAMA ===================
-class MultiMacroApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("Tek Exe - Pazar + Oyuna Giriş Makroları")
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True)
-        self.slot_tab = SlotCheckerApp(notebook)
-        self.login_tab = LoginMacroTab(notebook)
-        notebook.add(self.slot_tab, text="Pazar Makrosu")
-        notebook.add(self.login_tab, text="Oyuna Giriş Makrosu")
-
-
+# =================== ÇALIŞTIR ===================
 if __name__ == "__main__":
-    app = MultiMacroApp()
+    app = SlotCheckerApp()
+    app.title("AHMET2 — Slot Checker + Güvenli Pano")
     app.mainloop()
